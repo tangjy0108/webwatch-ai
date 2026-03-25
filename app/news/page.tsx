@@ -64,7 +64,7 @@ export default function NewsPage() {
   };
 
   const addSource = async () => {
-    if (!newSource.name || !newSource.url) return;
+    if (!newSource.name || !newSource.url || !newSource.feed_url) return;
     const res = await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newSource) });
     const d = await res.json();
     if (d.source) setSources([...sources, d.source]);

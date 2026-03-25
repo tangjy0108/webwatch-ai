@@ -1,16 +1,27 @@
 "use client";
 import {
-  Newspaper, Briefcase, Send, Clock, CheckCircle2,
-  RefreshCw, MessageSquare, Sparkles, XCircle, AlertCircle,
+  Newspaper,
+  Briefcase,
+  Send,
+  Clock,
+  CheckCircle2,
+  RefreshCw,
+  MessageSquare,
+  Sparkles,
+  XCircle,
+  AlertCircle,
+  FlaskConical,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
 
+type LogType = "news" | "jobs" | "test";
+
 interface NotificationLog {
   id: number;
-  type: "news" | "jobs";
+  type: LogType;
   payload: string;
   sent_at: string;
   status: "sent" | "failed";
@@ -21,39 +32,44 @@ interface DashboardStats {
   notificationsToday: number;
   newJobsToday: number;
   lastRun: string | null;
-  systemOk: boolean;
   tgConnected: boolean;
+  dbConnected: boolean;
 }
 
-const systemStatus = [
-  { label: "新聞抓取", key: "newsToday" },
-  { label: "職缺掃描", key: "jobsToday" },
-  { label: "Telegram Bot", key: "tgConnected" },
-  { label: "資料庫連線", key: "dbOk" },
-];
+const DEFAULT_STATS: DashboardStats = {
+  newsToday: 0,
+  notificationsToday: 0,
+  newJobsToday: 0,
+  lastRun: null,
+  tgConnected: false,
+  dbConnected: false,
+};
+
+function logMeta(type: LogType) {
+  if (type === "news") {
+    return { icon: Newspaper, bg: "bg-[#F0EFFF]", color: "text-[#7C6FF7]", title: "今日早報" };
+  }
+  if (type === "jobs") {
+    return { icon: Briefcase, bg: "bg-[#D1FAE5]", color: "text-[#34D399]", title: "職缺通知" };
+  }
+  return { icon: FlaskConical, bg: "bg-[#EFF6FF]", color: "text-[#60A5FA]", title: "測試訊息" };
+}
 
 export default function Dashboard() {
   const [logs, setLogs] = useState<NotificationLog[]>([]);
-  const [stats, setStats] = useState<DashboardStats>({
-    newsToday: 0, notificationsToday: 0, newJobsToday: 0,
-    lastRun: null, systemOk: true, tgConnected: false,
-  });
+  const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
   const [running, setRunning] = useState<"news" | "jobs" | "test" | null>(null);
-  const [statusMap, setStatusMap] = useState({ newsToday: true, jobsToday: true, tgConnected: false, dbOk: true });
 
   const today = new Date().toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "short" });
 
+  const refresh = async () => {
+    const data = await fetch("/api/dashboard").then(r => r.json());
+    setLogs(data.logs || []);
+    setStats(data.stats || DEFAULT_STATS);
+  };
+
   useEffect(() => {
-    fetch("/api/dashboard").then(r => r.json()).then(d => {
-      setLogs(d.logs || []);
-      setStats(d.stats || stats);
-      setStatusMap({
-        newsToday: true,
-        jobsToday: true,
-        tgConnected: d.stats?.tgConnected || false,
-        dbOk: true,
-      });
-    }).catch(() => {});
+    refresh().catch(() => {});
   }, []);
 
   const trigger = async (type: "news" | "jobs" | "test") => {
@@ -61,11 +77,10 @@ export default function Dashboard() {
     try {
       const url = type === "test" ? "/api/test-notify" : `/api/${type}/run`;
       await fetch(url, { method: "POST" });
-      // Refresh logs
-      const d = await fetch("/api/dashboard").then(r => r.json());
-      setLogs(d.logs || []);
-      setStats(d.stats || stats);
-    } catch {}
+      await refresh();
+    } catch {
+      // Ignore UI refresh failure here; dashboard will recover on next poll/manual refresh.
+    }
     setRunning(null);
   };
 
@@ -84,7 +99,7 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {statCards.map((stat) => (
+        {statCards.map(stat => (
           <Card key={stat.title} className="border-border shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-5">
               <div className={`w-10 h-10 rounded-xl ${stat.bgColor} flex items-center justify-center mb-3`}>
@@ -101,7 +116,6 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Logs */}
         <Card className="lg:col-span-2 border-border shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center gap-2">
@@ -112,34 +126,32 @@ export default function Dashboard() {
           <CardContent className="space-y-3">
             {logs.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">尚無推播記錄</p>
-            ) : logs.map((log) => (
-              <div key={log.id} className="flex items-center gap-4 p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors border border-border/50">
-                <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${log.type === "news" ? "bg-[#F0EFFF]" : "bg-[#D1FAE5]"}`}>
-                  {log.type === "news" ? <Newspaper className="w-4 h-4 text-[#7C6FF7]" /> : <Briefcase className="w-4 h-4 text-[#34D399]" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <h4 className="text-sm font-medium text-foreground">{log.type === "news" ? "今日早報" : "職缺通知"}</h4>
-                    <Badge className={`text-xs px-1.5 py-0 ${log.status === "sent" ? "bg-[#D1FAE5] text-[#059669] border-[#059669]/20" : "bg-[#FEE2E2] text-[#DC2626] border-[#DC2626]/20"}`}>
-                      {log.status === "sent" ? "已發送" : "失敗"}
-                    </Badge>
+            ) : logs.map(log => {
+              const meta = logMeta(log.type);
+              return (
+                <div key={log.id} className="flex items-center gap-4 p-3 rounded-xl bg-muted/30 hover:bg-muted/50 transition-colors border border-border/50">
+                  <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${meta.bg}`}>
+                    <meta.icon className={`w-4 h-4 ${meta.color}`} />
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{log.payload}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h4 className="text-sm font-medium text-foreground">{meta.title}</h4>
+                      <Badge className={`text-xs px-1.5 py-0 ${log.status === "sent" ? "bg-[#D1FAE5] text-[#059669] border-[#059669]/20" : "bg-[#FEE2E2] text-[#DC2626] border-[#DC2626]/20"}`}>
+                        {log.status === "sent" ? "已發送" : "失敗"}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{log.payload}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-xs font-medium text-foreground">{new Date(log.sent_at).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(log.sent_at).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}</p>
+                  </div>
                 </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-medium text-foreground">
-                    {new Date(log.sent_at).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {new Date(log.sent_at).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </CardContent>
         </Card>
 
-        {/* Status */}
         <div className="space-y-4">
           <Card className="border-border shadow-sm">
             <CardHeader className="pb-3">
@@ -150,14 +162,14 @@ export default function Dashboard() {
             </CardHeader>
             <CardContent className="space-y-3">
               {[
-                { label: "新聞抓取", ok: statusMap.newsToday },
-                { label: "職缺掃描", ok: statusMap.jobsToday },
-                { label: "Telegram Bot", ok: statusMap.tgConnected },
-                { label: "資料庫連線", ok: statusMap.dbOk },
-              ].map((s) => (
-                <div key={s.label} className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">{s.label}</span>
-                  {s.ok ? (
+                { label: "新聞抓取", ok: true },
+                { label: "職缺掃描", ok: true },
+                { label: "Telegram Bot", ok: stats.tgConnected },
+                { label: "資料庫連線", ok: stats.dbConnected },
+              ].map(item => (
+                <div key={item.label} className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">{item.label}</span>
+                  {item.ok ? (
                     <div className="flex items-center gap-1.5 text-[#059669]">
                       <CheckCircle2 className="w-4 h-4" /><span className="text-xs font-medium">正常</span>
                     </div>
@@ -175,30 +187,27 @@ export default function Dashboard() {
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Clock className="w-4 h-4 text-primary" />
-                下次執行
+                常用動作
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#F0EFFF] border border-[#7C6FF7]/10">
-                <div className="flex items-center gap-2">
-                  <Newspaper className="w-4 h-4 text-[#7C6FF7]" />
-                  <span className="text-sm font-medium text-foreground">新聞摘要</span>
-                </div>
-                <span className="text-sm font-semibold text-[#7C6FF7]">08:00</span>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-xl bg-[#D1FAE5] border border-[#34D399]/20">
-                <div className="flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-[#059669]" />
-                  <span className="text-sm font-medium text-foreground">職缺掃描</span>
-                </div>
-                <span className="text-sm font-semibold text-[#059669]">17:00</span>
-              </div>
+              <Button variant="outline" className="w-full rounded-xl justify-start" onClick={() => trigger("news")} disabled={running !== null}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${running === "news" ? "animate-spin" : ""}`} />
+                {running === "news" ? "執行新聞中…" : "手動執行新聞摘要"}
+              </Button>
+              <Button variant="outline" className="w-full rounded-xl justify-start" onClick={() => trigger("jobs")} disabled={running !== null}>
+                <RefreshCw className={`w-4 h-4 mr-2 ${running === "jobs" ? "animate-spin" : ""}`} />
+                {running === "jobs" ? "掃描職缺中…" : "手動掃描職缺"}
+              </Button>
+              <Button className="w-full rounded-xl justify-start" onClick={() => trigger("test")} disabled={running !== null}>
+                <Send className="w-4 h-4 mr-2" />
+                {running === "test" ? "發送中…" : "發送測試訊息"}
+              </Button>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Quick Actions */}
       <Card className="border-border shadow-sm bg-gradient-to-br from-white to-[#F0EFFF]/30">
         <CardContent className="p-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -207,24 +216,13 @@ export default function Dashboard() {
                 <AlertCircle className="w-5 h-5 text-primary" />
               </div>
               <div>
-                <h3 className="font-medium text-foreground mb-1">手動執行</h3>
-                <p className="text-sm text-muted-foreground">立即觸發抓取或推送，不等待排程</p>
+                <h3 className="font-medium text-foreground mb-1">目前已串起的 flow</h3>
+                <p className="text-sm text-muted-foreground">設定頁儲存到 Supabase，手動執行與 cron 都會共用同一套 runner，把新聞 / 職缺變動寫進 DB 並推送 Telegram。</p>
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="rounded-xl" onClick={() => trigger("news")} disabled={running !== null}>
-                <RefreshCw className={`w-4 h-4 mr-2 ${running === "news" ? "animate-spin" : ""}`} />
-                {running === "news" ? "執行中…" : "執行新聞摘要"}
-              </Button>
-              <Button variant="outline" className="rounded-xl" onClick={() => trigger("jobs")} disabled={running !== null}>
-                <RefreshCw className={`w-4 h-4 mr-2 ${running === "jobs" ? "animate-spin" : ""}`} />
-                {running === "jobs" ? "執行中…" : "掃描職缺"}
-              </Button>
-              <Button className="rounded-xl shadow-sm hover:shadow-md transition-shadow" onClick={() => trigger("test")} disabled={running !== null}>
-                <Send className="w-4 h-4 mr-2" />
-                {running === "test" ? "發送中…" : "發送測試訊息"}
-              </Button>
-            </div>
+            <Button variant="outline" className="rounded-xl" onClick={() => refresh().catch(() => {})} disabled={running !== null}>
+              <RefreshCw className="w-4 h-4 mr-2" />重新整理
+            </Button>
           </div>
         </CardContent>
       </Card>

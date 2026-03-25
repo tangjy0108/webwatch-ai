@@ -7,49 +7,77 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useEffect, useState } from "react";
 
+type TestResult = "ok" | "fail" | null;
+
 export default function SettingsPage() {
   const [botToken, setBotToken] = useState("");
   const [chatId, setChatId] = useState("");
   const [isVerified, setIsVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [resolvingChatId, setResolvingChatId] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
+  const [testResult, setTestResult] = useState<TestResult>(null);
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
   const [msgCount, setMsgCount] = useState(0);
   const [notifications, setNotifications] = useState({
-    newsMorning: true, jobsEvening: true, newsWeekend: false, jobsWeekend: false,
+    newsMorning: true,
+    jobsEvening: true,
+    newsWeekend: false,
+    jobsWeekend: false,
   });
 
   useEffect(() => {
-    fetch("/api/settings").then(r => r.json()).then(d => {
-      if (d.settings) {
-        setBotToken(d.settings.tg_bot_token || "");
-        setChatId(d.settings.tg_chat_id || "");
-        setIsVerified(!!(d.settings.tg_bot_token && d.settings.tg_chat_id));
-        setNotifications({
-          newsMorning: d.settings.notify_news ?? true,
-          jobsEvening: d.settings.notify_jobs ?? true,
-          newsWeekend: d.settings.notify_weekends ?? false,
-          jobsWeekend: d.settings.notify_weekends ?? false,
-        });
-      }
-      setDbConnected(d.dbConnected ?? false);
-      setMsgCount(d.msgCount ?? 0);
-    }).catch(() => setDbConnected(false));
+    fetch("/api/settings")
+      .then(r => r.json())
+      .then(data => {
+        if (data.settings) {
+          setBotToken(data.settings.tg_bot_token || "");
+          setChatId(data.settings.tg_chat_id || "");
+          setIsVerified(Boolean(data.settings.tg_bot_token && data.settings.tg_chat_id));
+          setNotifications({
+            newsMorning: data.settings.notify_news ?? true,
+            jobsEvening: data.settings.notify_jobs ?? true,
+            newsWeekend: data.settings.news_weekend ?? data.settings.notify_weekends ?? false,
+            jobsWeekend: data.settings.jobs_weekend ?? data.settings.notify_weekends ?? false,
+          });
+        }
+        setDbConnected(data.dbConnected ?? false);
+        setMsgCount(data.msgCount ?? 0);
+      })
+      .catch(() => setDbConnected(false));
   }, []);
 
   const verify = async () => {
     setVerifying(true);
     try {
-      const res = await fetch("/api/settings", {
+      const res = await fetch("/api/settings/verify-telegram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tg_bot_token: botToken, tg_chat_id: chatId }),
+        body: JSON.stringify({ botToken, chatId }),
       });
       setIsVerified(res.ok);
-    } catch { setIsVerified(false); }
+    } catch {
+      setIsVerified(false);
+    }
     setVerifying(false);
+  };
+
+  const resolveChatId = async () => {
+    if (!botToken) return;
+    setResolvingChatId(true);
+    try {
+      const res = await fetch("/api/settings/resolve-chat-id", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botToken }),
+      });
+      const data = await res.json();
+      if (res.ok && data.chatId) setChatId(String(data.chatId));
+    } catch {
+      // Keep current UI state if resolve fails.
+    }
+    setResolvingChatId(false);
   };
 
   const sendTest = async () => {
@@ -58,24 +86,32 @@ export default function SettingsPage() {
     try {
       const res = await fetch("/api/test-notify", { method: "POST" });
       setTestResult(res.ok ? "ok" : "fail");
-    } catch { setTestResult("fail"); }
+    } catch {
+      setTestResult("fail");
+    }
     setTesting(false);
   };
 
   const save = async () => {
     setSaving(true);
-    await fetch("/api/settings", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tg_bot_token: botToken,
-        tg_chat_id: chatId,
-        notify_news: notifications.newsMorning,
-        notify_jobs: notifications.jobsEvening,
-        notify_weekends: notifications.newsWeekend || notifications.jobsWeekend,
-      }),
-    });
-    setSaving(false);
+    try {
+      await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tg_bot_token: botToken,
+          tg_chat_id: chatId,
+          notify_news: notifications.newsMorning,
+          notify_jobs: notifications.jobsEvening,
+          news_weekend: notifications.newsWeekend,
+          jobs_weekend: notifications.jobsWeekend,
+          notify_weekends: notifications.newsWeekend || notifications.jobsWeekend,
+        }),
+      });
+      setIsVerified(Boolean(botToken && chatId));
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -89,7 +125,6 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* TG Config */}
         <Card className="lg:col-span-2 border-border shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><MessageSquare className="w-5 h-5 text-primary" />Telegram Bot 設定</CardTitle>
@@ -117,7 +152,7 @@ export default function SettingsPage() {
               <Label>Bot Token</Label>
               <div className="flex gap-2">
                 <Input type="password" placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz" value={botToken} onChange={e => setBotToken(e.target.value)} className="rounded-xl border-border bg-white" />
-                <Button variant="outline" className={`rounded-xl whitespace-nowrap ${isVerified ? "border-[#059669] text-[#059669]" : ""}`} onClick={verify} disabled={!botToken || verifying}>
+                <Button variant="outline" className={`rounded-xl whitespace-nowrap ${isVerified ? "border-[#059669] text-[#059669]" : ""}`} onClick={verify} disabled={!botToken || !chatId || verifying}>
                   {verifying ? "驗證中…" : isVerified ? <><Check className="w-4 h-4 mr-1" />已驗證</> : "驗證"}
                 </Button>
               </div>
@@ -128,13 +163,9 @@ export default function SettingsPage() {
               <Label>Chat ID</Label>
               <div className="flex gap-2">
                 <Input placeholder="123456789" value={chatId} onChange={e => setChatId(e.target.value)} className="rounded-xl border-border bg-white" />
-                <Button variant="outline" className="rounded-xl whitespace-nowrap" onClick={async () => {
-                  if (!botToken) return;
-                  const res = await fetch(`https://api.telegram.org/bot${botToken}/getUpdates`);
-                  const data = await res.json();
-                  const id = data?.result?.[0]?.message?.chat?.id;
-                  if (id) setChatId(String(id));
-                }}>自動取得</Button>
+                <Button variant="outline" className="rounded-xl whitespace-nowrap" onClick={resolveChatId} disabled={!botToken || resolvingChatId}>
+                  {resolvingChatId ? "取得中…" : "自動取得"}
+                </Button>
               </div>
               <p className="text-xs text-muted-foreground">你的個人 Chat ID，用於接收推播訊息</p>
             </div>
@@ -149,7 +180,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Sidebar status */}
         <div className="space-y-4">
           <Card className="border-border shadow-sm">
             <CardContent className="p-6">
@@ -160,7 +190,7 @@ export default function SettingsPage() {
                 <div>
                   <p className="text-sm text-muted-foreground mb-1">Bot 狀態</p>
                   <h3 className={`text-xl font-semibold ${isVerified ? "text-[#059669]" : "text-foreground"}`}>{isVerified ? "已連線" : "未設定"}</h3>
-                  <p className="text-xs text-muted-foreground mt-1">{isVerified ? "Bot 運作正常，可接收推播" : "請完成上方設定"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{isVerified ? "Bot 驗證成功，可接收推播" : "請完成上方設定"}</p>
                 </div>
               </div>
             </CardContent>
@@ -181,7 +211,6 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* DB status */}
           <Card className="border-border shadow-sm">
             <CardContent className="p-6">
               <div className="flex items-start gap-3">
@@ -190,12 +219,8 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground mb-1">資料庫</p>
-                  <h3 className={`text-lg font-semibold ${dbConnected ? "text-[#059669]" : "text-[#DC2626]"}`}>
-                    {dbConnected === null ? "檢查中…" : dbConnected ? "已連線" : "未連線"}
-                  </h3>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {dbConnected ? "Supabase 連線正常" : "請設定環境變數"}
-                  </p>
+                  <h3 className={`text-lg font-semibold ${dbConnected ? "text-[#059669]" : "text-[#DC2626]"}`}>{dbConnected === null ? "檢查中…" : dbConnected ? "已連線" : "未連線"}</h3>
+                  <p className="text-xs text-muted-foreground mt-1">{dbConnected ? "Supabase 連線正常" : "請設定環境變數"}</p>
                 </div>
               </div>
             </CardContent>
@@ -203,7 +228,6 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Notification Preferences */}
       <Card className="border-border shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Bell className="w-5 h-5 text-primary" />通知偏好</CardTitle>
@@ -213,8 +237,8 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {[
               { key: "newsMorning" as const, icon: Newspaper, bg: "bg-[#F0EFFF]", color: "text-[#7C6FF7]", label: "每日早報", desc: "早上 8:00 新聞摘要" },
-              { key: "jobsEvening" as const, icon: Briefcase, bg: "bg-[#D1FAE5]", color: "text-[#059669]", label: "職缺通知", desc: "下午 5:00 職缺更新" },
-              { key: "newsWeekend" as const, icon: Newspaper, bg: "bg-[#FEF3C7]", color: "text-[#D97706]", label: "假日早報", desc: "週六、週日也推送新聞" },
+              { key: "jobsEvening" as const, icon: Briefcase, bg: "bg-[#D1FAE5]", color: "text-[#059669]", label: "職缺通知", desc: "依排程掃描 104 職缺變動" },
+              { key: "newsWeekend" as const, icon: Newspaper, bg: "bg-[#FEF3C7]", color: "text-[#D97706]", label: "假日早報", desc: "週六、週日也執行新聞抓取" },
               { key: "jobsWeekend" as const, icon: Briefcase, bg: "bg-[#FEF3C7]", color: "text-[#D97706]", label: "假日職缺", desc: "週六、週日也掃描職缺" },
             ].map(item => (
               <div key={item.key} className="flex items-center justify-between p-4 rounded-xl border border-border bg-muted/20">
@@ -227,7 +251,7 @@ export default function SettingsPage() {
                     <p className="text-xs text-muted-foreground">{item.desc}</p>
                   </div>
                 </div>
-                <Switch checked={notifications[item.key]} onCheckedChange={v => setNotifications(n => ({ ...n, [item.key]: v }))} />
+                <Switch checked={notifications[item.key]} onCheckedChange={value => setNotifications(current => ({ ...current, [item.key]: value }))} />
               </div>
             ))}
           </div>

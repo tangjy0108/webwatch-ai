@@ -2,92 +2,122 @@
 
 每日新聞摘要 + 104 職缺監控，透過 Telegram Bot 推播通知。
 
-- 每天早上 8 點自動抓取 RSS 新聞並推送摘要
-- 每天下午 5 點掃描 104 職缺，有新職缺立即通知
-- 支援關鍵字過濾、多城市、來源管理
+- RSS 新聞抓取、關鍵字過濾、摘要推播
+- 104 職缺掃描、薪資門檻 / 類別 / 年資 / 排除公司過濾
+- 追蹤新職缺、薪資變動、下架職缺
+- 設定儲存在 Supabase，排程由外部 cron 觸發
 
 ## 技術架構
 
-- **Frontend / Backend**: Next.js 15 (App Router)
-- **Database**: Supabase (PostgreSQL)
-- **Deployment**: Vercel
-- **Notification**: Telegram Bot API
-- **Scheduler**: 外部排程（cron-job.org）
+- Frontend / Backend: Next.js 15 (App Router)
+- Database: Supabase (PostgreSQL)
+- Deployment: Vercel
+- Notification: Telegram Bot API
+- Scheduler: cron-job.org 或其他外部 scheduler
 
----
-
-## 你還需要完成的步驟
-
-### 1. 建立 Supabase 專案
-
-1. 前往 [supabase.com](https://supabase.com) → 建立新專案
-2. 進入 **SQL Editor**，貼上並執行 `supabase/migration.sql` 的全部內容
-3. 記下以下三個值（在 Project Settings → API）：
-   - `Project URL`
-   - `anon public` key
-   - `service_role` key（**保密，不要外露**）
-
-### 2. 設定環境變數（本地）
+## 需要的環境變數
 
 ```bash
 cp .env.local.example .env.local
 ```
 
-填入 Supabase 的值：
-
-```
+```env
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
+CRON_SECRET=你自訂的一長串隨機字串
 ```
 
-### 3. 部署到 Vercel
+說明：
+- `SUPABASE_SERVICE_ROLE_KEY` 只用在 server side，不要暴露到前端。
+- `CRON_SECRET` 會保護 `/api/cron/news` 和 `/api/cron/jobs`，手動執行頁面不需要它。
 
-1. 前往 [vercel.com](https://vercel.com) → Import Git Repository → 選這個 repo
-2. 在 **Environment Variables** 填入上面三個變數（與 `.env.local` 相同）
-3. Deploy
+## Supabase 初始化 / 升級
 
-### 4. 設定 Telegram Bot
+1. 到 Supabase 建 project
+2. 打開 SQL Editor
+3. 執行 [supabase/migration.sql](./supabase/migration.sql)
 
-1. 在 Telegram 搜尋 **@BotFather** → 發送 `/newbot` → 取得 Bot Token
-2. 開啟你的 Bot 對話，發送任意訊息（讓 Bot 知道你的 Chat ID）
-3. 進入部署好的網站 → **設定頁面**
-4. 填入 Bot Token → 點「驗證」→ 自動取得 Chat ID
-5. 點「發送測試訊息」確認 Telegram 收到
-
-### 5. 設定外部排程（cron-job.org）
-
-1. 前往 [cron-job.org](https://cron-job.org)（免費）→ 註冊
-2. 建立兩個排程任務：
-
-| 任務 | URL | 時間（UTC） | 對應台灣時間 |
-|------|-----|------------|------------|
-| 新聞早報 | `POST https://你的域名/api/cron/news` | `0 0 * * *` | 早上 8:00 |
-| 職缺掃描 | `POST https://你的域名/api/cron/jobs` | `0 9 * * *` | 下午 5:00 |
-
-Method 選 **POST**，儲存即可
-
-### 6. 設定新聞與職缺條件（在網站上操作）
-
-- **新聞頁面**：開啟想訂閱的 RSS 來源，設定關注 / 排除關鍵字
-- **職缺頁面**：填入搜尋關鍵字（如「產品經理」）、選擇城市
-
----
+這份 migration 可以重跑，會補齊新欄位：
+- `news_summary_length`
+- `news_weekend`
+- `job_experience`
+- `job_exclude_companies`
+- `job_notify_salary_change`
+- `job_notify_removed`
+- `jobs_weekend`
+- `job_items.description`
+- `job_items.salary_low`
+- `job_items.salary_high`
+- `job_items.category_tags`
+- `job_items.experience_bucket`
+- `job_items.removed_at`
 
 ## 本地開發
 
 ```bash
 npm install
-cp .env.local.example .env.local  # 填入 Supabase 設定
 npm run dev
 ```
 
-## 手動觸發 API
+## 部署到 Vercel
+
+1. Import Git Repository
+2. 在 Vercel `Environment Variables` 填入上面 4 個變數
+3. Deploy
+
+## 站內設定流程
+
+1. 到「設定」頁填入 Telegram Bot Token
+2. 點「自動取得」取得 Chat ID
+3. 點「驗證」確認 Bot Token / Chat ID 可用
+4. 點「發送測試訊息」確認 Telegram 收得到
+5. 到「新聞設定」開啟 RSS 來源並設定關鍵字
+6. 到「職缺追蹤」設定關鍵字、城市、薪資 / 類別 / 年資等條件
+
+## 排程設定
+
+### 新聞抓取
+
+- URL: `POST https://你的域名/api/cron/news`
+- Header: `Authorization: Bearer <CRON_SECRET>`
+
+### 職缺掃描
+
+- URL: `POST https://你的域名/api/cron/jobs`
+- Header: `Authorization: Bearer <CRON_SECRET>`
+
+台灣時間範例：
+- 新聞：每天早上 8:00
+- 職缺：每天傍晚 5:00
+
+如果你用 cron-job.org，除了 Method 選 `POST`，也記得把 `Authorization` header 一起加上。
+
+## 目前 flow
+
+### 新聞
+
+1. 前台設定儲存到 `settings` / `news_sources`
+2. 外部 cron 觸發 `/api/cron/news`
+3. 後端抓 RSS、做關鍵字過濾、和 `news_items` 去重
+4. 新聞寫入 Supabase
+5. 如果 Telegram 已設定且 `notify_news=true`，就送摘要並記一筆 `notification_logs`
+
+### 職缺
+
+1. 前台設定儲存到 `settings`
+2. 外部 cron 觸發 `/api/cron/jobs`
+3. 後端抓 104、套用城市 / 類別 / 最低薪資 / 年資 / 排除公司過濾
+4. 寫入 / 更新 `job_items`
+5. 比對新職缺、薪資變動、下架職缺
+6. 如果 Telegram 已設定且 `notify_jobs=true`，就送通知並記一筆 `notification_logs`
+
+## 手動測試 API
 
 ```bash
-# 手動執行新聞抓取
-curl -X POST https://你的域名/api/cron/news
-
-# 手動執行職缺掃描
-curl -X POST https://你的域名/api/cron/jobs
+curl -X POST https://你的域名/api/news/run
+curl -X POST https://你的域名/api/jobs/run
+curl -X POST https://你的域名/api/test-notify
 ```
+
+手動執行 API 會直接跑 job，不需要 `CRON_SECRET`。

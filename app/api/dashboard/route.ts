@@ -1,10 +1,25 @@
 import { NextResponse } from "next/server";
 import { getServerClient, isDbConfigured } from "@/lib/supabase";
 
+function emptyResponse() {
+  return {
+    logs: [],
+    stats: {
+      newsToday: 0,
+      notificationsToday: 0,
+      newJobsToday: 0,
+      lastRun: null,
+      tgConnected: false,
+      dbConnected: false,
+    },
+  };
+}
+
 export async function GET() {
-  if (!isDbConfigured()) {
-    return NextResponse.json({ logs: [], stats: { newsToday: 0, notificationsToday: 0, newJobsToday: 0, lastRun: null, tgConnected: false } });
+  if (isDbConfigured() === false) {
+    return NextResponse.json(emptyResponse());
   }
+
   try {
     const db = getServerClient();
     const todayStart = new Date();
@@ -14,7 +29,7 @@ export async function GET() {
       db.from("notification_logs").select("*").order("sent_at", { ascending: false }).limit(20),
       db.from("news_items").select("id", { count: "exact", head: true }).gte("fetched_at", todayStart.toISOString()),
       db.from("job_items").select("id", { count: "exact", head: true }).gte("first_seen_at", todayStart.toISOString()),
-      db.from("settings").select("tg_bot_token,tg_chat_id").eq("id", 1).single(),
+      db.from("settings").select("tg_bot_token,tg_chat_id").eq("id", 1).maybeSingle(),
     ]);
 
     const logs = logsRes.data || [];
@@ -24,13 +39,14 @@ export async function GET() {
       logs,
       stats: {
         newsToday: newsRes.count ?? 0,
-        notificationsToday: logs.filter(l => new Date(l.sent_at) >= todayStart).length,
+        notificationsToday: logs.filter(log => new Date(log.sent_at) >= todayStart && log.status === "sent").length,
         newJobsToday: jobsRes.count ?? 0,
         lastRun: lastLog?.sent_at || null,
-        tgConnected: !!(settingsRes.data?.tg_bot_token && settingsRes.data?.tg_chat_id),
+        tgConnected: Boolean(settingsRes.data?.tg_bot_token && settingsRes.data?.tg_chat_id),
+        dbConnected: true,
       },
     });
   } catch {
-    return NextResponse.json({ logs: [], stats: { newsToday: 0, notificationsToday: 0, newJobsToday: 0, lastRun: null, tgConnected: false } });
+    return NextResponse.json(emptyResponse());
   }
 }
