@@ -58,6 +58,11 @@ interface LatestDigest {
   updated_at: string;
 }
 
+interface ActionFeedback {
+  type: "success" | "error";
+  text: string;
+}
+
 const DEFAULT_STATS: DashboardStats = {
   newsToday: 0,
   notificationsToday: 0,
@@ -82,6 +87,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
   const [latestDigest, setLatestDigest] = useState<LatestDigest | null>(null);
   const [running, setRunning] = useState<"news" | "jobs" | "test" | null>(null);
+  const [feedback, setFeedback] = useState<ActionFeedback | null>(null);
 
   const today = new Date().toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "short" });
 
@@ -98,12 +104,15 @@ export default function Dashboard() {
 
   const trigger = async (type: "news" | "jobs" | "test") => {
     setRunning(type);
+    setFeedback(null);
     try {
       const url = type === "test" ? "/api/test-notify" : `/api/${type}/run`;
-      await fetch(url, { method: "POST" });
+      const res = await fetch(url, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      setFeedback(buildActionFeedback(type, res.ok, data));
       await refresh();
     } catch {
-      // Ignore UI refresh failure here; dashboard will recover on next poll/manual refresh.
+      setFeedback({ type: "error", text: "執行失敗，請稍後再試。" });
     }
     setRunning(null);
   };
@@ -121,6 +130,12 @@ export default function Dashboard() {
         <h1 className="text-2xl lg:text-3xl font-semibold text-foreground">早安 ☀️</h1>
         <p className="text-muted-foreground">{today}・今日情報摘要</p>
       </div>
+
+      {feedback && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${feedback.type === "success" ? "border-[#A7F3D0] bg-[#ECFDF5] text-[#065F46]" : "border-[#FCA5A5] bg-[#FEF2F2] text-[#991B1B]"}`}>
+          {feedback.text}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map(stat => (
@@ -314,4 +329,31 @@ export default function Dashboard() {
       </Card>
     </div>
   );
+}
+
+function buildActionFeedback(type: "news" | "jobs" | "test", ok: boolean, payload: any): ActionFeedback {
+  if (type === "news") {
+    if (!ok) {
+      return { type: "error", text: payload?.message || payload?.error || "新聞執行失敗" };
+    }
+    if (payload?.digestGenerated) {
+      return { type: "success", text: `新聞已執行，並成功產生 AI digest。${payload?.count ? `本次新增 ${payload.count} 則新聞。` : ""}`.trim() };
+    }
+    if (payload?.digestError) {
+      return { type: "error", text: `新聞有抓到，但 AI digest 失敗：${payload.digestError}` };
+    }
+    return { type: "success", text: `新聞已執行，但這次沒有產生 AI digest。${payload?.message || ""}`.trim() };
+  }
+
+  if (type === "jobs") {
+    if (!ok) {
+      return { type: "error", text: payload?.message || payload?.error || "職缺掃描失敗" };
+    }
+    return { type: "success", text: payload?.message || "職缺掃描完成" };
+  }
+
+  if (!ok) {
+    return { type: "error", text: payload?.error || "測試訊息發送失敗" };
+  }
+  return { type: "success", text: "測試訊息已發送" };
 }
