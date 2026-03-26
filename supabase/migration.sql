@@ -14,6 +14,13 @@ create table if not exists settings (
   news_exclude_keywords text[] default '{}',
   news_summary_length text default 'medium',
   news_weekend boolean default false,
+  news_ai_enabled boolean default false,
+  news_ai_api_key text default '',
+  news_ai_api_base_url text default 'https://api.openai.com/v1',
+  news_ai_model text default '',
+  news_ai_system_prompt text default '',
+  news_ai_temperature double precision default 0.2,
+  news_ai_max_input_items integer default 8,
   job_keywords text[] default '{}',
   job_cities text[] default '{}',
   job_categories text[] default '{}',
@@ -28,6 +35,13 @@ create table if not exists settings (
 
 alter table settings add column if not exists news_summary_length text default 'medium';
 alter table settings add column if not exists news_weekend boolean default false;
+alter table settings add column if not exists news_ai_enabled boolean default false;
+alter table settings add column if not exists news_ai_api_key text default '';
+alter table settings add column if not exists news_ai_api_base_url text default 'https://api.openai.com/v1';
+alter table settings add column if not exists news_ai_model text default '';
+alter table settings add column if not exists news_ai_system_prompt text default '';
+alter table settings add column if not exists news_ai_temperature double precision default 0.2;
+alter table settings add column if not exists news_ai_max_input_items integer default 8;
 alter table settings add column if not exists job_experience text default 'any';
 alter table settings add column if not exists job_exclude_companies text[] default '{}';
 alter table settings add column if not exists job_notify_salary_change boolean default true;
@@ -65,6 +79,20 @@ create table if not exists news_items (
   summary text,
   url_hash text unique,
   fetched_at timestamptz default now()
+);
+
+create table if not exists news_digests (
+  id serial primary key,
+  digest_date date not null unique,
+  title text not null default '',
+  summary text not null default '',
+  observation text not null default '',
+  picks jsonb not null default '[]'::jsonb,
+  item_count integer not null default 0,
+  source_count integer not null default 0,
+  model text not null default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 create table if not exists job_items (

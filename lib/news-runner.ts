@@ -1,4 +1,6 @@
+import { generateNewsDigest, isNewsDigestConfigured } from "@/lib/news-digest";
 import { fetchRSSFeed, filterByKeywords } from "@/lib/rss";
+import { getTelegramBotToken, getTelegramChatId } from "@/lib/server-config";
 import { mergeWithDefaultSettings, isWeekendInTaipei, summarizeText } from "@/lib/settings";
 import { getServerClient, isDbConfigured } from "@/lib/supabase";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -12,6 +14,8 @@ export interface NewsRunResult {
   message: string;
   sent: boolean;
   skipped: boolean;
+  digestGenerated: boolean;
+  digestError: string | null;
 }
 
 function buildNewsHash(url: string): string {
@@ -20,7 +24,7 @@ function buildNewsHash(url: string): string {
 
 export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsRunResult> {
   if (isDbConfigured() === false) {
-    return { ok: false, status: 503, count: 0, message: "DB not configured", sent: false, skipped: false };
+    return { ok: false, status: 503, count: 0, message: "DB not configured", sent: false, skipped: false, digestGenerated: false, digestError: null };
   }
 
   const db = getServerClient();
@@ -34,11 +38,11 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
     const settings = mergeWithDefaultSettings(rawSettings || undefined);
 
     if (trigger === "cron" && settings.news_weekend === false && isWeekendInTaipei()) {
-      return { ok: true, status: 200, count: 0, message: "Skipped on weekend", sent: false, skipped: true };
+      return { ok: true, status: 200, count: 0, message: "Skipped on weekend", sent: false, skipped: true, digestGenerated: false, digestError: null };
     }
 
     if (!sources || sources.length === 0) {
-      return { ok: true, status: 200, count: 0, message: "No enabled sources", sent: false, skipped: false };
+      return { ok: true, status: 200, count: 0, message: "No enabled sources", sent: false, skipped: false, digestGenerated: false, digestError: null };
     }
 
     const feedResults = await Promise.all(sources.map(source => fetchRSSFeed(source.feed_url, source.name, 20)));
@@ -51,7 +55,7 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
     const candidates = candidatePool.map(item => ({ ...item, urlHash: buildNewsHash(item.url) }));
 
     if (candidates.length === 0) {
-      return { ok: true, status: 200, count: 0, message: "No matching news items", sent: false, skipped: false };
+      return { ok: true, status: 200, count: 0, message: "No matching news items", sent: false, skipped: false, digestGenerated: false, digestError: null };
     }
 
     const { data: existingHashes } = await db
@@ -62,29 +66,65 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
     const existing = new Set((existingHashes || []).map(item => item.url_hash));
     const maxItems = settings.news_max_items > 0 ? settings.news_max_items : candidates.length;
     const newItems = candidates.filter(item => existing.has(item.urlHash) === false).slice(0, maxItems);
+    const digestItems = newItems.length > 0 ? newItems : (trigger === "manual" ? candidates.slice(0, maxItems) : []);
 
-    if (newItems.length === 0) {
-      return { ok: true, status: 200, count: 0, message: "No new items", sent: false, skipped: false };
+    if (newItems.length > 0) {
+      const { error: insertError } = await db.from("news_items").insert(
+        newItems.map(item => ({
+          title: item.title,
+          url: item.url,
+          source: item.source,
+          summary: item.summary,
+          published_at: item.publishedAt,
+          url_hash: item.urlHash,
+          fetched_at: new Date().toISOString(),
+        })),
+      );
+
+      if (insertError) {
+        throw insertError;
+      }
     }
 
-    const { error: insertError } = await db.from("news_items").insert(
-      newItems.map(item => ({
-        title: item.title,
-        url: item.url,
-        source: item.source,
-        summary: item.summary,
-        published_at: item.publishedAt,
-        url_hash: item.urlHash,
-        fetched_at: new Date().toISOString(),
-      })),
-    );
+    if (newItems.length === 0 && digestItems.length === 0) {
+      return { ok: true, status: 200, count: 0, message: "No new items", sent: false, skipped: false, digestGenerated: false, digestError: null };
+    }
 
-    if (insertError) {
-      throw insertError;
+    let digestGenerated = false;
+    let digestError: string | null = null;
+
+    if (digestItems.length > 0 && isNewsDigestConfigured(settings)) {
+      try {
+        const digest = await generateNewsDigest(digestItems, settings);
+        const { error: digestInsertError } = await db.from("news_digests").upsert({
+          digest_date: getTaipeiDateKey(),
+          title: digest.title,
+          summary: digest.summary,
+          observation: digest.observation,
+          picks: digest.picks,
+          item_count: digest.itemCount,
+          source_count: digest.sourceCount,
+          model: digest.model,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: "digest_date",
+        });
+
+        if (digestInsertError) {
+          throw digestInsertError;
+        }
+
+        digestGenerated = true;
+      } catch (error: any) {
+        digestError = error?.message || "Failed to generate digest";
+        console.error("News digest generation error:", error);
+      }
     }
 
     let sent = false;
-    if (settings.notify_news && settings.tg_bot_token && settings.tg_chat_id) {
+    const telegramBotToken = getTelegramBotToken();
+    const telegramChatId = getTelegramChatId(settings.tg_chat_id);
+    if (settings.notify_news && telegramBotToken && telegramChatId) {
       const today = new Date().toLocaleDateString("zh-TW", {
         timeZone: "Asia/Taipei",
         month: "numeric",
@@ -102,17 +142,39 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
         msg += `💡 <b>今日觀察</b>\n今天共抓取 ${newItems.length} 則新聞。`;
       }
 
-      sent = await sendTelegramMessage(settings.tg_bot_token, settings.tg_chat_id, msg);
+      sent = await sendTelegramMessage(telegramBotToken, telegramChatId, msg);
       await db.from("notification_logs").insert({
         type: "news",
-        payload: `今日早報：${newItems.length} 則新聞`,
+        payload: `今日早報：${newItems.length} 則新聞${digestGenerated ? "，已產生 AI digest" : ""}`,
         status: sent ? "sent" : "failed",
       });
     }
 
-    return { ok: true, status: 200, count: newItems.length, message: `Stored ${newItems.length} news items`, sent, skipped: false };
+    return {
+      ok: true,
+      status: 200,
+      count: newItems.length,
+      message: newItems.length > 0
+        ? `Stored ${newItems.length} news items`
+        : digestGenerated
+          ? "Regenerated digest from latest matching items"
+          : "No new items",
+      sent,
+      skipped: false,
+      digestGenerated,
+      digestError,
+    };
   } catch (error: any) {
     console.error("News cron error:", error);
-    return { ok: false, status: 500, count: 0, message: error?.message || "News cron failed", sent: false, skipped: false };
+    return { ok: false, status: 500, count: 0, message: error?.message || "News cron failed", sent: false, skipped: false, digestGenerated: false, digestError: null };
   }
+}
+
+function getTaipeiDateKey(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }

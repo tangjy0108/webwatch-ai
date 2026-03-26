@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
+import { getTelegramBotToken } from "@/lib/server-config";
 import { verifyTelegramBot, verifyTelegramDestination } from "@/lib/telegram";
 
 export async function POST(req: Request) {
   try {
-    const { botToken, chatId } = await req.json();
-    if (!botToken || !chatId) {
-      return NextResponse.json({ ok: false, error: "Missing botToken or chatId" }, { status: 400 });
+    const { chatId } = await req.json();
+    const botToken = getTelegramBotToken();
+    if (!botToken) {
+      return NextResponse.json({ ok: false, error: "Missing TELEGRAM_BOT_TOKEN env" }, { status: 503 });
+    }
+    if (!chatId) {
+      return NextResponse.json({ ok: false, error: "Missing chatId" }, { status: 400 });
     }
 
     const botOk = await verifyTelegramBot(botToken);

@@ -3,6 +3,7 @@
 每日新聞摘要 + 104 職缺監控，透過 Telegram Bot 推播通知。
 
 - RSS 新聞抓取、關鍵字過濾、摘要推播
+- OpenAI-compatible AI digest 產生器，可把當日新聞整理成免費版摘要
 - 104 職缺掃描、薪資門檻 / 類別 / 年資 / 排除公司過濾
 - 追蹤新職缺、薪資變動、下架職缺
 - 設定儲存在 Supabase，排程由外部 cron 觸發
@@ -26,11 +27,25 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
 CRON_SECRET=你自訂的一長串隨機字串
+
+# Telegram
+TELEGRAM_BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
+# 可選：若不想存在資料庫，也可以直接放 env
+TELEGRAM_CHAT_ID=123456789
+
+# Gemini
+GEMINI_API_KEY=你的_google_ai_studio_api_key
+# 可選：未設定時預設會用 Gemini OpenAI compatibility endpoint
+NEWS_AI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+# 可選：未設定時預設使用 gemini-2.5-flash
+NEWS_AI_MODEL=gemini-2.5-flash
 ```
 
 說明：
 - `SUPABASE_SERVICE_ROLE_KEY` 只用在 server side，不要暴露到前端。
 - `CRON_SECRET` 會保護 `/api/cron/news` 和 `/api/cron/jobs`，手動執行頁面不需要它。
+- `TELEGRAM_BOT_TOKEN` 和 `GEMINI_API_KEY` 都屬於 secret，請放在 Vercel env，不要放在站內設定頁。
+- AI digest 目前走 Gemini 的 OpenAI compatibility 介面。
 
 ## Supabase 初始化 / 升級
 
@@ -63,17 +78,18 @@ npm run dev
 ## 部署到 Vercel
 
 1. Import Git Repository
-2. 在 Vercel `Environment Variables` 填入上面 4 個變數
+2. 在 Vercel `Environment Variables` 填入上面的 Supabase / Cron / Telegram / Gemini 變數
 3. Deploy
 
 ## 站內設定流程
 
-1. 到「設定」頁填入 Telegram Bot Token
-2. 點「自動取得」取得 Chat ID
-3. 點「驗證」確認 Bot Token / Chat ID 可用
+1. 先在 Vercel 設好 `TELEGRAM_BOT_TOKEN` 與 `GEMINI_API_KEY`
+2. 到「設定」頁點「自動取得」取得 Chat ID
+3. 點「驗證」確認 Telegram 通知路徑可用
 4. 點「發送測試訊息」確認 Telegram 收得到
 5. 到「新聞設定」開啟 RSS 來源並設定關鍵字
-6. 到「職缺追蹤」設定關鍵字、城市、薪資 / 類別 / 年資等條件
+6. 到「設定」頁調整 AI Digest 的 Base URL / Model / Prompt / Temperature
+7. 到「職缺追蹤」設定關鍵字、城市、薪資 / 類別 / 年資等條件
 
 ## 排程設定
 
@@ -101,7 +117,8 @@ npm run dev
 2. 外部 cron 觸發 `/api/cron/news`
 3. 後端抓 RSS、做關鍵字過濾、和 `news_items` 去重
 4. 新聞寫入 Supabase
-5. 如果 Telegram 已設定且 `notify_news=true`，就送摘要並記一筆 `notification_logs`
+5. 如果已啟用 AI Digest，會使用 `GEMINI_API_KEY` 把今日候選新聞送到模型並寫入 `news_digests`
+6. 如果 Telegram 已設定且 `notify_news=true`，就送摘要並記一筆 `notification_logs`
 
 ### 職缺
 

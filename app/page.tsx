@@ -36,6 +36,28 @@ interface DashboardStats {
   dbConnected: boolean;
 }
 
+interface DigestPick {
+  itemNumber: number;
+  title: string;
+  source: string;
+  url: string;
+  angle: string;
+  whyItMatters: string;
+}
+
+interface LatestDigest {
+  id: number;
+  digest_date: string;
+  title: string;
+  summary: string;
+  observation: string;
+  picks: DigestPick[];
+  item_count: number;
+  source_count: number;
+  model: string;
+  updated_at: string;
+}
+
 const DEFAULT_STATS: DashboardStats = {
   newsToday: 0,
   notificationsToday: 0,
@@ -58,6 +80,7 @@ function logMeta(type: LogType) {
 export default function Dashboard() {
   const [logs, setLogs] = useState<NotificationLog[]>([]);
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
+  const [latestDigest, setLatestDigest] = useState<LatestDigest | null>(null);
   const [running, setRunning] = useState<"news" | "jobs" | "test" | null>(null);
 
   const today = new Date().toLocaleDateString("zh-TW", { month: "long", day: "numeric", weekday: "short" });
@@ -66,6 +89,7 @@ export default function Dashboard() {
     const data = await fetch("/api/dashboard").then(r => r.json());
     setLogs(data.logs || []);
     setStats(data.stats || DEFAULT_STATS);
+    setLatestDigest(data.latestDigest || null);
   };
 
   useEffect(() => {
@@ -114,6 +138,68 @@ export default function Dashboard() {
           </Card>
         ))}
       </div>
+
+      <Card className="border-border shadow-sm bg-gradient-to-br from-white to-[#EFF6FF]/40">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-primary" />
+            最新免費版 Digest
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {latestDigest ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className="bg-[#EFF6FF] text-[#2563EB] border-[#2563EB]/10">
+                      {new Date(latestDigest.digest_date).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" })}
+                    </Badge>
+                    <Badge variant="outline">{latestDigest.item_count} 則新聞</Badge>
+                    <Badge variant="outline">{latestDigest.source_count} 個來源</Badge>
+                  </div>
+                  <h2 className="text-xl font-semibold text-foreground">{latestDigest.title}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">{latestDigest.summary}</p>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  <p>Model: {latestDigest.model || "未記錄"}</p>
+                  <p>更新時間：{new Date(latestDigest.updated_at).toLocaleString("zh-TW")}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                {(latestDigest.picks || []).map((pick) => (
+                  <a
+                    key={`${pick.itemNumber}-${pick.url}`}
+                    href={pick.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block rounded-xl border border-border bg-white/80 p-4 transition-colors hover:bg-muted/20"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="secondary">{pick.angle}</Badge>
+                      <span className="text-xs text-muted-foreground">{pick.source}</span>
+                    </div>
+                    <h3 className="text-sm font-medium text-foreground leading-6">{pick.title}</h3>
+                    <p className="mt-2 text-sm text-muted-foreground leading-6">{pick.whyItMatters}</p>
+                  </a>
+                ))}
+              </div>
+
+              {latestDigest.observation && (
+                <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">今日觀察</p>
+                  <p className="mt-2 text-sm text-foreground leading-6">{latestDigest.observation}</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border bg-muted/20 p-6 text-sm text-muted-foreground">
+              目前還沒有免費版 digest。先到新聞設定與 AI 設定填好來源、API Key、Model，然後手動執行一次新聞摘要。
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 border-border shadow-sm">

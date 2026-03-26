@@ -1,4 +1,5 @@
 import { search104Jobs, type Job104 } from "@/lib/jobs104";
+import { getTelegramBotToken, getTelegramChatId } from "@/lib/server-config";
 import { mergeWithDefaultSettings, isWeekendInTaipei } from "@/lib/settings";
 import { getServerClient, isDbConfigured } from "@/lib/supabase";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -124,7 +125,9 @@ export async function runJobsJob(trigger: RunnerTrigger = "cron"): Promise<JobsR
     const shouldNotify = newJobs.length > 0 || (includeSalaryChanges && salaryChangedJobs.length > 0) || (includeRemoved && removedJobs.length > 0);
 
     let sent = false;
-    if (shouldNotify && settings.notify_jobs && settings.tg_bot_token && settings.tg_chat_id) {
+    const telegramBotToken = getTelegramBotToken();
+    const telegramChatId = getTelegramChatId(settings.tg_chat_id);
+    if (shouldNotify && settings.notify_jobs && telegramBotToken && telegramChatId) {
       const today = new Date().toLocaleDateString("zh-TW", {
         timeZone: "Asia/Taipei",
         month: "numeric",
@@ -158,7 +161,7 @@ export async function runJobsJob(trigger: RunnerTrigger = "cron"): Promise<JobsR
         msg += summarizeJobs(`📪 已下架 ${removedJobs.length} 筆`, mappedRemoved, job => (job.salary ? `💰 ${job.salary}` : ""));
       }
 
-      sent = await sendTelegramMessage(settings.tg_bot_token, settings.tg_chat_id, msg.trim());
+      sent = await sendTelegramMessage(telegramBotToken, telegramChatId, msg.trim());
       await db.from("notification_logs").insert({
         type: "jobs",
         payload: `職缺更新：新增 ${newJobs.length}、薪資變動 ${includeSalaryChanges ? salaryChangedJobs.length : 0}、下架 ${includeRemoved ? removedJobs.length : 0}`,

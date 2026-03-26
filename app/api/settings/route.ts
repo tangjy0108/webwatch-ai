@@ -1,4 +1,11 @@
 import { NextResponse } from "next/server";
+import {
+  getNewsAiBaseUrl,
+  getNewsAiModel,
+  getTelegramChatId,
+  getTelegramBotToken,
+  getNewsAiApiKey,
+} from "@/lib/server-config";
 import { mergeWithDefaultSettings, sanitizeSettingsPatch } from "@/lib/settings";
 import { getServerClient, isDbConfigured } from "@/lib/supabase";
 
@@ -19,6 +26,13 @@ export async function GET() {
       settings: mergeWithDefaultSettings(rawSettings || undefined),
       dbConnected: true,
       msgCount: count ?? 0,
+      secrets: {
+        telegramBotTokenConfigured: Boolean(getTelegramBotToken()),
+        telegramChatIdConfigured: Boolean(getTelegramChatId(rawSettings?.tg_chat_id)),
+        geminiApiKeyConfigured: Boolean(getNewsAiApiKey()),
+        effectiveNewsAiBaseUrl: getNewsAiBaseUrl(rawSettings?.news_ai_api_base_url),
+        effectiveNewsAiModel: getNewsAiModel(rawSettings?.news_ai_model),
+      },
     });
   } catch {
     return NextResponse.json({ settings: null, dbConnected: false, msgCount: 0 });
