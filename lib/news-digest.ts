@@ -172,6 +172,7 @@ function extractJsonObject(content: string): string {
 
 function buildFallbackRawDigest(content: string, items: RSSItem[]): RawDigestResponse {
   const normalized = trimParagraph(content, 280);
+  const recovered = recoverDigestFieldsFromText(content);
   const picks = items.slice(0, Math.min(3, items.length)).map((item, index) => ({
     itemNumber: index + 1,
     angle: "值得留意",
@@ -179,11 +180,62 @@ function buildFallbackRawDigest(content: string, items: RSSItem[]): RawDigestRes
   }));
 
   return {
-    title: "今日科技免費版 Digest",
-    summary: normalized || `今天整理了 ${items.length} 則值得留意的科技更新。`,
-    observation: normalized ? trimParagraph(normalized, 120) : "",
+    title: recovered.title || "今日科技免費版 Digest",
+    summary: recovered.summary || normalized || `今天整理了 ${items.length} 則值得留意的科技更新。`,
+    observation: recovered.observation || (normalized ? trimParagraph(normalized, 120) : ""),
     picks,
   };
+}
+
+function recoverDigestFieldsFromText(content: string): {
+  title: string;
+  summary: string;
+  observation: string;
+} {
+  const title = extractLooseJsonString(content, "title");
+  const summary = extractLooseJsonString(content, "summary");
+  const observation = extractLooseJsonString(content, "observation");
+
+  return {
+    title: trimParagraph(title, 60),
+    summary: trimParagraph(summary, 280),
+    observation: trimParagraph(observation, 120),
+  };
+}
+
+function extractLooseJsonString(content: string, key: string): string {
+  const marker = `"${key}"`;
+  const start = content.indexOf(marker);
+  if (start < 0) return "";
+
+  const colon = content.indexOf(":", start + marker.length);
+  if (colon < 0) return "";
+
+  let cursor = colon + 1;
+  while (cursor < content.length && /\s/.test(content[cursor])) cursor += 1;
+  if (content[cursor] !== "\"") return "";
+  cursor += 1;
+
+  let result = "";
+  let escaped = false;
+  for (; cursor < content.length; cursor += 1) {
+    const char = content[cursor];
+    if (escaped) {
+      result += char === "n" ? " " : char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (char === "\"") {
+      break;
+    }
+    result += char;
+  }
+
+  return result.trim();
 }
 
 function normalizeDigest(raw: RawDigestResponse, items: RSSItem[], model: string): GeneratedNewsDigest {
