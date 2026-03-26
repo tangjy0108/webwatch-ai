@@ -260,7 +260,10 @@ function normalizeDigest(raw: RawDigestResponse, items: RSSItem[], model: string
     url: item.url,
     publishedAt: item.publishedAt,
     angle: "值得留意",
+    priority: index === 0 ? "high" as const : "medium" as const,
+    forWhom: "想跟上 AI 工具更新的工程師、PM 或創作者",
     whyItMatters: trimParagraph(item.summary, 120) || "這則更新值得追蹤後續發展。",
+    action: "先看原文重點，再決定要不要深入研究。",
   }));
 
   const rawPicks = Array.isArray(raw.picks) ? raw.picks as RawDigestPick[] : [];
