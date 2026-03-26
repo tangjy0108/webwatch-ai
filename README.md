@@ -24,8 +24,9 @@ cp .env.local.example .env.local
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+SUPABASE_SECRET_KEY=sb_secret_xxx
+# 舊命名也支援，但較不建議
+# SUPABASE_SERVICE_ROLE_KEY=eyJ...
 CRON_SECRET=你自訂的一長串隨機字串
 
 # Telegram
@@ -42,7 +43,8 @@ NEWS_AI_MODEL=gemini-2.5-flash
 ```
 
 說明：
-- `SUPABASE_SERVICE_ROLE_KEY` 只用在 server side，不要暴露到前端。
+- `SUPABASE_SECRET_KEY` 只用在 server side，不要暴露到前端。
+- 如果你目前手上只有舊的 `service_role` JWT key，也可以先放到 `SUPABASE_SERVICE_ROLE_KEY`。
 - `CRON_SECRET` 會保護 `/api/cron/news` 和 `/api/cron/jobs`，手動執行頁面不需要它。
 - `TELEGRAM_BOT_TOKEN` 和 `GEMINI_API_KEY` 都屬於 secret，請放在 Vercel env，不要放在站內設定頁。
 - AI digest 目前走 Gemini 的 OpenAI compatibility 介面。
