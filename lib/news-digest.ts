@@ -35,6 +35,39 @@ interface RawDigestResponse {
   picks?: unknown;
 }
 
+const DIGEST_RESPONSE_FORMAT = {
+  type: "json_schema",
+  json_schema: {
+    name: "news_digest",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string" },
+        summary: { type: "string" },
+        observation: { type: "string" },
+        picks: {
+          type: "array",
+          minItems: 3,
+          maxItems: 5,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              itemNumber: { type: "integer" },
+              angle: { type: "string" },
+              whyItMatters: { type: "string" },
+            },
+            required: ["itemNumber", "angle", "whyItMatters"],
+          },
+        },
+      },
+      required: ["title", "summary", "observation", "picks"],
+    },
+  },
+} as const;
+
 export function isNewsDigestConfigured(settings: AppSettings): boolean {
   return Boolean(settings.news_ai_enabled && isNewsAiConfigured(settings.news_ai_model, settings.news_ai_api_base_url));
 }
@@ -58,6 +91,7 @@ export async function generateNewsDigest(items: RSSItem[], settings: AppSettings
       model,
       temperature: settings.news_ai_temperature,
       max_tokens: 1000,
+      response_format: DIGEST_RESPONSE_FORMAT,
       messages: [
         {
           role: "system",
@@ -78,7 +112,7 @@ export async function generateNewsDigest(items: RSSItem[], settings: AppSettings
 
   const payload = await response.json();
   const content = extractAssistantContent(payload);
-  const parsed = parseDigestPayload(content);
+  const parsed = parseDigestPayload(content, limitedItems);
 
   return normalizeDigest(parsed, limitedItems, model);
 }
@@ -95,6 +129,7 @@ function buildDigestUserPrompt(items: RSSItem[]): string {
     "請根據以下新聞項目產出今日免費版 digest。",
     "注意：只能使用以下資料，不可杜撰額外資訊。",
     "請挑出 3 到 5 則重點，並用 itemNumber 指回原始項目。",
+    "你必須只回傳單一 JSON 物件，不要加上 markdown、前言、結語或任何額外說明。",
     "",
     lines.join("\n\n"),
   ].join("\n");
@@ -112,9 +147,13 @@ function extractAssistantContent(payload: any): string {
   throw new Error("Digest API returned empty content");
 }
 
-function parseDigestPayload(content: string): RawDigestResponse {
-  const jsonText = extractJsonObject(content);
-  return JSON.parse(jsonText) as RawDigestResponse;
+function parseDigestPayload(content: string, items: RSSItem[]): RawDigestResponse {
+  try {
+    const jsonText = extractJsonObject(content);
+    return JSON.parse(jsonText) as RawDigestResponse;
+  } catch {
+    return buildFallbackRawDigest(content, items);
+  }
 }
 
 function extractJsonObject(content: string): string {
@@ -129,6 +168,22 @@ function extractJsonObject(content: string): string {
   if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
 
   throw new Error("Digest response did not contain JSON");
+}
+
+function buildFallbackRawDigest(content: string, items: RSSItem[]): RawDigestResponse {
+  const normalized = trimParagraph(content, 280);
+  const picks = items.slice(0, Math.min(3, items.length)).map((item, index) => ({
+    itemNumber: index + 1,
+    angle: "值得留意",
+    whyItMatters: trimParagraph(item.summary, 140) || "這則更新值得追蹤後續發展。",
+  }));
+
+  return {
+    title: "今日科技免費版 Digest",
+    summary: normalized || `今天整理了 ${items.length} 則值得留意的科技更新。`,
+    observation: normalized ? trimParagraph(normalized, 120) : "",
+    picks,
+  };
 }
 
 function normalizeDigest(raw: RawDigestResponse, items: RSSItem[], model: string): GeneratedNewsDigest {
