@@ -16,8 +16,8 @@ create table if not exists settings (
   news_weekend boolean default false,
   news_ai_enabled boolean default false,
   news_ai_api_key text default '',
-  news_ai_api_base_url text default 'https://api.openai.com/v1',
-  news_ai_model text default '',
+  news_ai_api_base_url text default 'https://generativelanguage.googleapis.com/v1beta/openai',
+  news_ai_model text default 'gemini-2.5-flash',
   news_ai_system_prompt text default '',
   news_ai_temperature double precision default 0.2,
   news_ai_max_input_items integer default 8,
@@ -37,8 +37,8 @@ alter table settings add column if not exists news_summary_length text default '
 alter table settings add column if not exists news_weekend boolean default false;
 alter table settings add column if not exists news_ai_enabled boolean default false;
 alter table settings add column if not exists news_ai_api_key text default '';
-alter table settings add column if not exists news_ai_api_base_url text default 'https://api.openai.com/v1';
-alter table settings add column if not exists news_ai_model text default '';
+alter table settings add column if not exists news_ai_api_base_url text default 'https://generativelanguage.googleapis.com/v1beta/openai';
+alter table settings add column if not exists news_ai_model text default 'gemini-2.5-flash';
 alter table settings add column if not exists news_ai_system_prompt text default '';
 alter table settings add column if not exists news_ai_temperature double precision default 0.2;
 alter table settings add column if not exists news_ai_max_input_items integer default 8;
@@ -49,6 +49,18 @@ alter table settings add column if not exists job_notify_removed boolean default
 alter table settings add column if not exists jobs_weekend boolean default false;
 
 insert into settings (id) values (1) on conflict (id) do nothing;
+
+alter table settings alter column news_ai_api_base_url set default 'https://generativelanguage.googleapis.com/v1beta/openai';
+alter table settings alter column news_ai_model set default 'gemini-2.5-flash';
+
+update settings
+set news_ai_api_base_url = 'https://generativelanguage.googleapis.com/v1beta/openai'
+where coalesce(trim(news_ai_api_base_url), '') = ''
+   or trim(news_ai_api_base_url) = 'https://api.openai.com/v1';
+
+update settings
+set news_ai_model = 'gemini-2.5-flash'
+where coalesce(trim(news_ai_model), '') = '';
 
 create table if not exists news_sources (
   id serial primary key,
