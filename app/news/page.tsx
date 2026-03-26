@@ -35,12 +35,26 @@ export default function NewsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<EditingSource | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sourceMessage, setSourceMessage] = useState<string | null>(null);
+  const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/sources").then(r => r.json()).then(d => setSources(d.sources || [])).catch(() => {});
-    fetch("/api/settings").then(r => r.json()).then(d => {
-      if (d.settings) setSettings(s => ({ ...s, ...d.settings }));
-    }).catch(() => {});
+    fetch("/api/sources")
+      .then(async r => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || "無法讀取新聞來源");
+        setSources(data.sources || []);
+        setSourceMessage(null);
+      })
+      .catch((error: Error) => setSourceMessage(error.message));
+
+    fetch("/api/settings")
+      .then(async r => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || "無法讀取新聞設定");
+        if (data.settings) setSettings(s => ({ ...s, ...data.settings }));
+      })
+      .catch((error: Error) => setSettingsMessage(error.message));
   }, []);
 
   const toggleSource = async (id: number) => {
@@ -48,28 +62,56 @@ export default function NewsPage() {
     if (!src) return;
     const updated = sources.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s);
     setSources(updated);
-    await fetch(`/api/sources/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !src.enabled }) });
+    const res = await fetch(`/api/sources/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !src.enabled }) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSources(sources);
+      setSourceMessage(data?.error || "更新來源失敗");
+      return;
+    }
+    setSourceMessage(null);
   };
 
   const saveEdit = async () => {
     if (!editing) return;
+    const previousSources = sources;
     setSources(sources.map(s => s.id === editing.id ? { ...s, ...editing } : s));
-    await fetch(`/api/sources/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: editing.name, url: editing.url, feed_url: editing.feed_url }) });
+    const res = await fetch(`/api/sources/${editing.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: editing.name, url: editing.url, feed_url: editing.feed_url }) });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSources(previousSources);
+      setSourceMessage(data?.error || "儲存來源失敗");
+      return;
+    }
+    setSourceMessage(null);
     setEditing(null);
   };
 
   const removeSource = async (id: number) => {
+    const previousSources = sources;
     setSources(sources.filter(s => s.id !== id));
-    await fetch(`/api/sources/${id}`, { method: "DELETE" });
+    const res = await fetch(`/api/sources/${id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      setSources(previousSources);
+      setSourceMessage(data?.error || "刪除來源失敗");
+      return;
+    }
+    setSourceMessage(null);
   };
 
   const addSource = async () => {
     if (!newSource.name || !newSource.url || !newSource.feed_url) return;
     const res = await fetch("/api/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(newSource) });
-    const d = await res.json();
-    if (d.source) setSources([...sources, d.source]);
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || !d.source) {
+      setSourceMessage(d?.error || "新增來源失敗");
+      return;
+    }
+    setSources([...sources, d.source]);
     setNewSource({ name: "", url: "", feed_url: "" });
     setShowAdd(false);
+    setSourceMessage(null);
   };
 
   const addKeyword = (type: "include" | "exclude", val: string) => {
@@ -86,7 +128,9 @@ export default function NewsPage() {
 
   const saveSettings = async () => {
     setSaving(true);
-    await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
+    const res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
+    const data = await res.json().catch(() => ({}));
+    setSettingsMessage(res.ok ? "新聞設定已儲存" : (data?.error || "新聞設定儲存失敗"));
     setSaving(false);
   };
 
@@ -101,6 +145,12 @@ export default function NewsPage() {
           {saving ? "儲存中…" : "儲存設定"}
         </Button>
       </div>
+
+      {(sourceMessage || settingsMessage) && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${sourceMessage ? "border-[#FCA5A5] bg-[#FEF2F2] text-[#991B1B]" : "border-[#A7F3D0] bg-[#ECFDF5] text-[#065F46]"}`}>
+          {sourceMessage || settingsMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
@@ -129,6 +179,11 @@ export default function NewsPage() {
                     <Button size="sm" className="rounded-xl" onClick={addSource}>新增來源</Button>
                     <Button size="sm" variant="outline" className="rounded-xl" onClick={() => setShowAdd(false)}>取消</Button>
                   </div>
+                </div>
+              )}
+              {sources.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
+                  目前還沒有可用來源。若你剛剛新增後又消失，通常是 RSS URL 重複、`news_sources` 尚未建表，或 Supabase migration 還沒重跑。
                 </div>
               )}
               {sources.map((source) => (

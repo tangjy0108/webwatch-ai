@@ -4,7 +4,8 @@ import { getServerClient, isDbConfigured } from "@/lib/supabase";
 export async function GET() {
   if (isDbConfigured() === false) return NextResponse.json({ sources: [] });
   const db = getServerClient();
-  const { data } = await db.from("news_sources").select("*").order("id");
+  const { data, error } = await db.from("news_sources").select("*").order("id");
+  if (error) return NextResponse.json({ error: error.message, sources: [] }, { status: 500 });
   return NextResponse.json({ sources: data || [] });
 }
 

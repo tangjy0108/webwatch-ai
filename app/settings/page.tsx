@@ -47,6 +47,7 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<TestResult>(null);
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
   const [msgCount, setMsgCount] = useState(0);
+  const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [secretStatus, setSecretStatus] = useState({
     telegramBotTokenConfigured: false,
     telegramChatIdConfigured: false,
@@ -109,6 +110,7 @@ export default function SettingsPage() {
   }, []);
 
   const verify = async () => {
+    setSaveMessage(null);
     setVerifying(true);
     try {
       const res = await fetch("/api/settings/verify-telegram", {
@@ -124,6 +126,7 @@ export default function SettingsPage() {
   };
 
   const resolveChatId = async () => {
+    setSaveMessage(null);
     setResolvingChatId(true);
     try {
       const res = await fetch("/api/settings/resolve-chat-id", {
@@ -140,6 +143,7 @@ export default function SettingsPage() {
   };
 
   const sendTest = async () => {
+    setSaveMessage(null);
     setTesting(true);
     setTestResult(null);
     try {
@@ -156,6 +160,7 @@ export default function SettingsPage() {
   };
 
   const save = async () => {
+    setSaveMessage(null);
     setSaving(true);
     try {
       const res = await fetch("/api/settings", {
@@ -178,8 +183,14 @@ export default function SettingsPage() {
       });
 
       if (res.ok) {
+        setSaveMessage({ type: "success", text: "設定已儲存" });
         setIsVerified(Boolean(secretStatus.telegramBotTokenConfigured && chatId.trim()));
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSaveMessage({ type: "error", text: data?.error || "設定儲存失敗" });
       }
+    } catch {
+      setSaveMessage({ type: "error", text: "設定儲存失敗，請稍後再試" });
     } finally {
       setSaving(false);
     }
@@ -196,6 +207,12 @@ export default function SettingsPage() {
         </div>
         <Button className="rounded-xl" onClick={save} disabled={saving}>{saving ? "儲存中…" : "儲存設定"}</Button>
       </div>
+
+      {saveMessage && (
+        <div className={`rounded-xl border px-4 py-3 text-sm ${saveMessage.type === "success" ? "border-[#A7F3D0] bg-[#ECFDF5] text-[#065F46]" : "border-[#FCA5A5] bg-[#FEF2F2] text-[#991B1B]"}`}>
+          {saveMessage.text}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2 border-border shadow-sm">
@@ -344,7 +361,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 p-4">
             <div>
               <p className="text-sm font-medium text-foreground">啟用 AI Digest</p>
-              <p className="text-xs text-muted-foreground">新聞 runner 會在寫入 news_items 後呼叫 Gemini 產生免費版 digest</p>
+              <p className="text-xs text-muted-foreground">新聞 runner 會在寫入 news_items 後呼叫 Gemini 產生免費版 digest。切換後要按上方「儲存設定」。</p>
             </div>
             <Switch checked={aiSettings.enabled} onCheckedChange={value => setAiSettings(current => ({ ...current, enabled: value }))} />
           </div>
