@@ -1,4 +1,4 @@
-import { generateNewsDigest, isNewsDigestConfigured } from "@/lib/news-digest";
+import { GeneratedNewsDigest, generateNewsDigest, isNewsDigestConfigured } from "@/lib/news-digest";
 import { fetchRSSFeed, filterByKeywords } from "@/lib/rss";
 import { getTelegramBotToken, getTelegramChatId } from "@/lib/server-config";
 import { mergeWithDefaultSettings, isWeekendInTaipei, summarizeText } from "@/lib/settings";
@@ -92,10 +92,12 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
 
     let digestGenerated = false;
     let digestError: string | null = null;
+    let generatedDigest: GeneratedNewsDigest | null = null;
 
     if (digestItems.length > 0 && isNewsDigestConfigured(settings)) {
       try {
         const digest = await generateNewsDigest(digestItems, settings);
+        generatedDigest = digest;
         const { error: digestInsertError } = await db.from("news_digests").upsert({
           digest_date: getTaipeiDateKey(),
           title: digest.title,
@@ -130,22 +132,16 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
         month: "numeric",
         day: "numeric",
       });
-      let msg = `📰 <b>今日早報｜${today}</b>\n\n`;
-      newItems.forEach((item, index) => {
-        msg += `${index + 1}. <b>${item.title}</b>\n`;
-        if (item.summary) {
-          msg += `${summarizeText(item.summary, settings.news_summary_length)}\n`;
-        }
-        msg += `<a href="${item.url}">來源：${item.source}</a>\n\n`;
-      });
-      if (settings.news_daily_observation) {
-        msg += `💡 <b>今日觀察</b>\n今天共抓取 ${newItems.length} 則新聞。`;
-      }
+      const msg = generatedDigest
+        ? formatDigestTelegramMessage(generatedDigest, today)
+        : formatFallbackNewsMessage(newItems, today, settings.news_daily_observation, settings.news_summary_length);
 
       sent = await sendTelegramMessage(telegramBotToken, telegramChatId, msg);
       await db.from("notification_logs").insert({
         type: "news",
-        payload: `今日早報：${newItems.length} 則新聞${digestGenerated ? "，已產生 AI digest" : ""}`,
+        payload: generatedDigest
+          ? `今日 AI brief：${generatedDigest.picks.length} 則重點`
+          : `今日早報：${newItems.length} 則新聞${digestGenerated ? "，已產生 AI digest" : ""}`,
         status: sent ? "sent" : "failed",
       });
     }
@@ -168,6 +164,54 @@ export async function runNewsJob(trigger: RunnerTrigger = "cron"): Promise<NewsR
     console.error("News cron error:", error);
     return { ok: false, status: 500, count: 0, message: error?.message || "News cron failed", sent: false, skipped: false, digestGenerated: false, digestError: null };
   }
+}
+
+function formatDigestTelegramMessage(digest: GeneratedNewsDigest, today: string): string {
+  let msg = `🧠 <b>${escapeHtml(digest.title)}｜${today}</b>\n\n`;
+  msg += `<b>今天先看什麼</b>\n${escapeHtml(digest.summary)}\n\n`;
+
+  digest.picks.slice(0, 3).forEach((pick, index) => {
+    const priority = pick.priority === "high" ? "高優先" : pick.priority === "low" ? "低優先" : "中優先";
+    msg += `${index + 1}. <b>${escapeHtml(pick.title)}</b>\n`;
+    msg += `標記：${escapeHtml(pick.angle)}｜${priority}\n`;
+    if (pick.forWhom) msg += `適合誰看：${escapeHtml(pick.forWhom)}\n`;
+    msg += `為什麼重要：${escapeHtml(pick.whyItMatters)}\n`;
+    if (pick.action) msg += `建議動作：${escapeHtml(pick.action)}\n`;
+    msg += `<a href="${pick.url}">查看原文</a>\n\n`;
+  });
+
+  if (digest.observation) {
+    msg += `⏭️ <b>今天可以先略過</b>\n${escapeHtml(digest.observation)}`;
+  }
+
+  return msg.trim();
+}
+
+function formatFallbackNewsMessage(
+  items: Array<{ title: string; summary: string; source: string; url: string }>,
+  today: string,
+  includeObservation: boolean,
+  summaryLength: Parameters<typeof summarizeText>[1],
+): string {
+  let msg = `📰 <b>今日早報｜${today}</b>\n\n`;
+  items.forEach((item, index) => {
+    msg += `${index + 1}. <b>${escapeHtml(item.title)}</b>\n`;
+    if (item.summary) {
+      msg += `${escapeHtml(summarizeText(item.summary, summaryLength))}\n`;
+    }
+    msg += `<a href="${item.url}">來源：${escapeHtml(item.source)}</a>\n\n`;
+  });
+  if (includeObservation) {
+    msg += `💡 <b>今日觀察</b>\n今天共抓取 ${items.length} 則新聞。`;
+  }
+  return msg.trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function getTaipeiDateKey(date = new Date()): string {

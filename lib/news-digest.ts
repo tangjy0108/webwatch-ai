@@ -9,7 +9,10 @@ export interface NewsDigestPick {
   url: string;
   publishedAt: string;
   angle: string;
+  priority: "high" | "medium" | "low";
+  forWhom: string;
   whyItMatters: string;
+  action: string;
 }
 
 export interface GeneratedNewsDigest {
@@ -25,7 +28,10 @@ export interface GeneratedNewsDigest {
 interface RawDigestPick {
   itemNumber?: unknown;
   angle?: unknown;
+  priority?: unknown;
+  forWhom?: unknown;
   whyItMatters?: unknown;
+  action?: unknown;
 }
 
 interface RawDigestResponse {
@@ -57,9 +63,12 @@ const DIGEST_RESPONSE_FORMAT = {
             properties: {
               itemNumber: { type: "integer" },
               angle: { type: "string" },
+              priority: { type: "string", enum: ["high", "medium", "low"] },
+              forWhom: { type: "string" },
               whyItMatters: { type: "string" },
+              action: { type: "string" },
             },
-            required: ["itemNumber", "angle", "whyItMatters"],
+            required: ["itemNumber", "angle", "priority", "forWhom", "whyItMatters", "action"],
           },
         },
       },
@@ -126,9 +135,11 @@ function buildDigestUserPrompt(items: RSSItem[]): string {
   ].join("\n"));
 
   return [
-    "請根據以下新聞項目產出今日免費版 digest。",
+    "請根據以下新聞項目產出今日 AI 更新免費版 brief。",
     "注意：只能使用以下資料，不可杜撰額外資訊。",
-    "請挑出 3 到 5 則重點，並用 itemNumber 指回原始項目。",
+    "請只保留對 AI 工具、AI 平台、模型、開發流程、自動化工作流有直接影響的更新。",
+    "請挑出 3 到 5 則最值得追的重點，並用 itemNumber 指回原始項目。",
+    "summary 要回答「今天先看什麼」。observation 要回答「今天可以先略過什麼」。",
     "你必須只回傳單一 JSON 物件，不要加上 markdown、前言、結語或任何額外說明。",
     "",
     lines.join("\n\n"),
@@ -176,13 +187,16 @@ function buildFallbackRawDigest(content: string, items: RSSItem[]): RawDigestRes
   const picks = items.slice(0, Math.min(3, items.length)).map((item, index) => ({
     itemNumber: index + 1,
     angle: "值得留意",
+    priority: index === 0 ? "high" as const : "medium" as const,
+    forWhom: "想跟上 AI 工具更新的工程師或產品人",
     whyItMatters: trimParagraph(item.summary, 140) || "這則更新值得追蹤後續發展。",
+    action: "快速看過標題與原文，再決定是否值得深入。",
   }));
 
   return {
-    title: recovered.title || "今日科技免費版 Digest",
-    summary: recovered.summary || normalized || `今天整理了 ${items.length} 則值得留意的科技更新。`,
-    observation: recovered.observation || (normalized ? trimParagraph(normalized, 120) : ""),
+    title: recovered.title || "今日 AI 更新 Brief",
+    summary: recovered.summary || normalized || `今天先看與 AI 工具、平台更新最相關的 ${items.length} 則訊息。`,
+    observation: recovered.observation || (normalized ? trimParagraph(normalized, 120) : "今天沒有明顯可先略過的項目。"),
     picks,
   };
 }
@@ -267,16 +281,19 @@ function normalizeDigest(raw: RawDigestResponse, items: RSSItem[], model: string
         url: sourceItem.url,
         publishedAt: sourceItem.publishedAt,
         angle: trimParagraph(toCleanString(pick.angle), 40) || "值得留意",
+        priority: normalizePriority(pick.priority),
+        forWhom: trimParagraph(toCleanString(pick.forWhom), 60) || "想跟上 AI 更新的使用者",
         whyItMatters: trimParagraph(toCleanString(pick.whyItMatters), 140) || trimParagraph(sourceItem.summary, 120) || "這則更新值得追蹤後續發展。",
+        action: trimParagraph(toCleanString(pick.action), 80) || "先看原文再決定是否值得深入。",
       };
     })
     .filter((pick): pick is NewsDigestPick => pick !== null)
     .slice(0, 5);
 
   return {
-    title: trimParagraph(toCleanString(raw.title), 60) || "今日科技免費版 Digest",
-    summary: trimParagraph(toCleanString(raw.summary), 280) || `今天整理了 ${items.length} 則值得留意的科技更新。`,
-    observation: trimParagraph(toCleanString(raw.observation), 120),
+    title: trimParagraph(toCleanString(raw.title), 60) || "今日 AI 更新 Brief",
+    summary: trimParagraph(toCleanString(raw.summary), 280) || `今天先看與 AI 工具、平台更新最相關的 ${items.length} 則訊息。`,
+    observation: trimParagraph(toCleanString(raw.observation), 120) || "今天沒有明顯可先略過的項目。",
     picks: picks.length > 0 ? picks : fallbackPicks,
     model,
     itemCount: items.length,
@@ -296,4 +313,9 @@ function trimParagraph(value: string, maxLength: number): string {
 
 function sanitizeInline(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizePriority(value: unknown): "high" | "medium" | "low" {
+  if (value === "high" || value === "medium" || value === "low") return value;
+  return "medium";
 }

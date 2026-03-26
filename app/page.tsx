@@ -42,7 +42,10 @@ interface DigestPick {
   source: string;
   url: string;
   angle: string;
+  priority?: "high" | "medium" | "low";
+  forWhom?: string;
   whyItMatters: string;
+  action?: string;
 }
 
 interface LatestDigest {
@@ -124,6 +127,15 @@ export default function Dashboard() {
     { title: "最後執行", value: stats.lastRun ? new Date(stats.lastRun).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" }) : "--:--", sub: stats.lastRun ? "今天" : "尚未執行", icon: Clock, color: "text-[#FBBF24]", bgColor: "bg-[#FEF3C7]" },
   ];
 
+  const openExternal = (url: string) => {
+    const safeUrl = normalizeExternalUrl(url);
+    if (!safeUrl || typeof window === "undefined") return;
+    const popup = window.open(safeUrl, "_blank", "noopener,noreferrer");
+    if (!popup) {
+      window.location.assign(safeUrl);
+    }
+  };
+
   return (
     <div className="p-4 lg:p-8 space-y-6 lg:space-y-8">
       <div className="space-y-1">
@@ -174,7 +186,10 @@ export default function Dashboard() {
                     <Badge variant="outline">{latestDigest.source_count} 個來源</Badge>
                   </div>
                   <h2 className="text-xl font-semibold text-foreground">{latestDigest.title}</h2>
-                  <p className="text-sm leading-6 text-muted-foreground">{latestDigest.summary}</p>
+                  <div className="rounded-xl border border-border bg-white/70 p-4">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">今天先看什麼</p>
+                    <p className="mt-2 text-sm leading-6 text-foreground">{latestDigest.summary}</p>
+                  </div>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   <p>Model: {latestDigest.model || "未記錄"}</p>
@@ -184,26 +199,29 @@ export default function Dashboard() {
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {(latestDigest.picks || []).map((pick) => (
-                  <a
+                  <button
                     key={`${pick.itemNumber}-${pick.url}`}
-                    href={pick.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block rounded-xl border border-border bg-white/80 p-4 transition-colors hover:bg-muted/20"
+                    type="button"
+                    onClick={() => openExternal(pick.url)}
+                    className="block w-full rounded-xl border border-border bg-white/80 p-4 text-left transition-colors hover:bg-muted/20"
                   >
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
                       <Badge variant="secondary">{pick.angle}</Badge>
+                      <Badge className={priorityTone(pick.priority)}>{priorityLabel(pick.priority)}</Badge>
                       <span className="text-xs text-muted-foreground">{pick.source}</span>
                     </div>
                     <h3 className="text-sm font-medium text-foreground leading-6">{pick.title}</h3>
+                    {pick.forWhom && <p className="mt-2 text-xs text-muted-foreground">適合誰看：{pick.forWhom}</p>}
                     <p className="mt-2 text-sm text-muted-foreground leading-6">{pick.whyItMatters}</p>
-                  </a>
+                    {pick.action && <p className="mt-2 text-sm text-foreground leading-6">建議動作：{pick.action}</p>}
+                    <p className="mt-3 text-xs font-medium text-primary">查看原文</p>
+                  </button>
                 ))}
               </div>
 
               {latestDigest.observation && (
                 <div className="rounded-xl border border-dashed border-border bg-muted/20 p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">今日觀察</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">今天可以先略過</p>
                   <p className="mt-2 text-sm text-foreground leading-6">{latestDigest.observation}</p>
                 </div>
               )}
@@ -329,6 +347,28 @@ export default function Dashboard() {
       </Card>
     </div>
   );
+}
+
+function normalizeExternalUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function priorityLabel(priority?: "high" | "medium" | "low") {
+  if (priority === "high") return "高優先";
+  if (priority === "low") return "低優先";
+  return "中優先";
+}
+
+function priorityTone(priority?: "high" | "medium" | "low") {
+  if (priority === "high") return "bg-[#FEE2E2] text-[#DC2626] border-[#DC2626]/20";
+  if (priority === "low") return "bg-[#ECFDF5] text-[#059669] border-[#059669]/20";
+  return "bg-[#FEF3C7] text-[#B45309] border-[#B45309]/20";
 }
 
 function buildActionFeedback(type: "news" | "jobs" | "test", ok: boolean, payload: any): ActionFeedback {
